@@ -12,11 +12,6 @@ struct Stat {
 	uint32_t tx_bytes;
 	uint32_t rx_packets;
 	uint32_t rx_bytes;
-
-	bool operator<(const Stat& other)
-	{
-		return tx_bytes + rx_bytes < other.tx_bytes + other.rx_bytes;
-	}
 };
 
 int main(int argc, char* argv[]) {
@@ -78,10 +73,9 @@ int main(int argc, char* argv[]) {
 
 		std::map<uint32_t, Stat>::iterator stat_finder = stat_endpoint_ip.find(src_ip);
 		std::pair<std::map<uint32_t, Stat>::iterator, bool> insert_info;
-		Stat empty_stat = {0,0,0,0};
 
 		if (stat_finder == stat_endpoint_ip.end()) {
-			insert_info = stat_endpoint_ip.insert({src_ip, empty_stat});
+			insert_info = stat_endpoint_ip.insert({src_ip, Stat()});
 			stat_finder = insert_info.first;
 		}
 
@@ -91,7 +85,7 @@ int main(int argc, char* argv[]) {
 		stat_finder = stat_endpoint_ip.find(dst_ip);
 
 		if (stat_finder == stat_endpoint_ip.end()) {
-			insert_info = stat_endpoint_ip.insert({dst_ip, empty_stat});
+			insert_info = stat_endpoint_ip.insert({dst_ip, Stat()});
 			stat_finder = insert_info.first;
 		}
 
