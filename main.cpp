@@ -7,6 +7,18 @@
 
 void usage();
 
+struct Stat {
+	uint32_t tx_packets;
+	uint32_t tx_bytes;
+	uint32_t rx_packets;
+	uint32_t rx_bytes;
+
+	bool operator<(const Stat& other)
+	{
+		return tx_bytes + rx_bytes < other.tx_bytes + other.rx_bytes;
+	}
+};
+
 int main(int argc, char* argv[]) {
 	// check syntax
 	if (argc != 2) {
@@ -27,10 +39,7 @@ int main(int argc, char* argv[]) {
 	}
 	
 	// maps for statistics
-	std::map<uint32_t, uint32_t> stat_endpoint_ip_tx_packets;
-	std::map<uint32_t, uint32_t> stat_endpoint_ip_tx_bytes;
-	std::map<uint32_t, uint32_t> stat_endpoint_ip_rx_packets;
-	std::map<uint32_t, uint32_t> stat_endpoint_ip_rx_bytes;
+	std::map<uint32_t, Stat> stat_endpoint_ip;
 	
 	/* file reading on loop */
 	while (true) {
@@ -66,43 +75,39 @@ int main(int argc, char* argv[]) {
 		/* apply to statistics */
 		uint32_t src_ip = (ipv4->src_ip_addr).ip;
 		uint32_t dst_ip = (ipv4->dst_ip_addr).ip;
-		
-		if (stat_endpoint_ip_tx_packets.find(src_ip) != stat_endpoint_ip_tx_packets.end()) {
-			stat_endpoint_ip_tx_packets[src_ip] += 1;
-			stat_endpoint_ip_tx_bytes[src_ip] += header->caplen;
-		} else {
-			stat_endpoint_ip_tx_packets[src_ip] = 1;
-			stat_endpoint_ip_tx_bytes[src_ip] = header->caplen;
+
+		std::map<uint32_t, Stat>::iterator stat_finder = stat_endpoint_ip.find(src_ip);
+		std::pair<std::map<uint32_t, Stat>::iterator, bool> insert_info;
+		Stat empty_stat = {0,0,0,0};
+
+		if (stat_finder == stat_endpoint_ip.end()) {
+			insert_info = stat_endpoint_ip.insert({src_ip, empty_stat});
+			stat_finder = insert_info.first;
 		}
+
+		stat_finder->second.tx_packets += 1;
+		stat_finder->second.tx_bytes += header->caplen;
 		
-		if (stat_endpoint_ip_rx_packets.find(dst_ip) != stat_endpoint_ip_rx_packets.end()) {
-			stat_endpoint_ip_rx_packets[dst_ip] += 1;
-			stat_endpoint_ip_rx_bytes[dst_ip] += header->caplen;
-		} else {
-			stat_endpoint_ip_rx_packets[dst_ip] = 1;
-			stat_endpoint_ip_rx_bytes[dst_ip] = header->caplen;
+		stat_finder = stat_endpoint_ip.find(dst_ip);
+
+		if (stat_finder == stat_endpoint_ip.end()) {
+			insert_info = stat_endpoint_ip.insert({dst_ip, empty_stat});
+			stat_finder = insert_info.first;
 		}
-		
-		if (stat_endpoint_ip_tx_packets.find(dst_ip) == stat_endpoint_ip_tx_packets.end()) {
-			stat_endpoint_ip_tx_packets[dst_ip] = 0;
-			stat_endpoint_ip_tx_bytes[dst_ip] = 0;
-		}
-		
-		if (stat_endpoint_ip_rx_packets.find(src_ip) == stat_endpoint_ip_rx_packets.end()) {
-			stat_endpoint_ip_rx_packets[src_ip] = 0;
-			stat_endpoint_ip_rx_bytes[src_ip] = 0;
-		}
+
+		stat_finder->second.rx_packets += 1;
+		stat_finder->second.rx_bytes += header->caplen;
 	}
 	
-	for (auto &map_elem : stat_endpoint_ip_tx_packets) {
+	for (auto &map_elem : stat_endpoint_ip) {
 		IPv4Addr addr;
 		addr.ip = map_elem.first;
 		addr.print_ipv4_addr();
 		printf(": Tx Packets=%u, Tx Bytes=%u, Rx Packets=%u, Rx Bytes=%u\n",
-		       stat_endpoint_ip_tx_packets[map_elem.first],
-		       stat_endpoint_ip_tx_bytes[map_elem.first],
-		       stat_endpoint_ip_rx_packets[map_elem.first],
-		       stat_endpoint_ip_rx_bytes[map_elem.first]
+		       stat_endpoint_ip[map_elem.first].tx_packets,
+		       stat_endpoint_ip[map_elem.first].tx_bytes,
+		       stat_endpoint_ip[map_elem.first].rx_packets,
+		       stat_endpoint_ip[map_elem.first].rx_bytes
 		);
 	}
 
