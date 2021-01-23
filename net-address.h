@@ -21,6 +21,7 @@ public:
 	MacAddr(const char *addr);
 	bool operator==(MacAddr &addr);
 	bool operator==(const char *addr);
+	bool operator<(const MacAddr &addr) const;
 };
 #pragma pack(pop)
 

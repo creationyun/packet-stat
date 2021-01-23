@@ -69,6 +69,14 @@ bool MacAddr::operator==(const char *addr) {
 	return ret;
 }
 
+bool MacAddr::operator<(const MacAddr &addr) const {	
+	for (int i = 0; i < 6; i++) {
+		if (mac[i] == addr.mac[i]) continue;
+		else return mac[i] < addr.mac[i];
+	}
+	return false;
+}
+
 /* print IP address */
 void IPv4Addr::print_ipv4_addr() {
 	uint32_t addr = ntohl(ip);

@@ -9,6 +9,7 @@ enum {
 	ETH_TYPE_IPv4 = 0x0800,
 	ETH_TYPE_ARP = 0x0806,
 	IP_PROTO_TCP = 0x06,
+	IP_PROTO_UDP = 0x11,
 	ARP_HTYPE_ETH = 1,
 	ARP_PTYPE_IPv4 = 0x0800,
 	ARP_OP_REQUEST = 1,
@@ -59,6 +60,17 @@ public:
 	uint16_t urgent_ptr;
 	
 	uint8_t get_tcp_hdrlen();
+};
+#pragma pack(pop)
+
+/* UDP header */
+#pragma pack(push, 1)
+class UDP {
+public:
+	uint16_t src_port;
+	uint16_t dst_port;
+	uint16_t length;
+	uint16_t chksum;
 };
 #pragma pack(pop)
 
