@@ -8,15 +8,26 @@
 void usage();
 
 struct Stat {
-	uint32_t tx_packets{0};
-	uint32_t tx_bytes{0};
-	uint32_t rx_packets{0};
-	uint32_t rx_bytes{0};
+	uint32_t packets{0};
+	uint32_t bytes{0};
 };
 
-typedef std::map<uint32_t, Stat> IpStat;
-typedef std::map<MacAddr, Stat> MacStat;
-typedef std::map<std::pair<uint32_t, uint16_t>, Stat> TcpUdpStat;
+struct EndpointStat {
+	Stat tx, rx;
+};
+
+struct ConvStat {
+	Stat first_to_second, second_to_first;
+};
+
+typedef std::pair<uint32_t, uint16_t> IpAndPort;
+
+typedef std::map<uint32_t, EndpointStat> IpStat;
+typedef std::map<MacAddr, EndpointStat> MacStat;
+typedef std::map<IpAndPort, EndpointStat> TcpUdpStat;
+
+typedef std::map<std::pair<uint32_t, uint32_t>, Stat> IpFlowStat;
+typedef std::map<std::pair<uint32_t, uint32_t>, ConvStat> IpConvStat;
 
 int main(int argc, char* argv[]) {
 	// check syntax
@@ -41,6 +52,7 @@ int main(int argc, char* argv[]) {
 	IpStat stat_endpoint_ip;
 	MacStat stat_endpoint_mac;
 	TcpUdpStat stat_endpoint_tcp, stat_endpoint_udp;
+	IpFlowStat stat_flow_ip;
 	
 	/* file reading on loop */
 	while (true) {
@@ -79,22 +91,22 @@ int main(int argc, char* argv[]) {
 			std::pair<MacStat::iterator, bool> insert_info;
 
 			if (stat_finder == stat_endpoint_mac.end()) {
-				insert_info = stat_endpoint_mac.insert({src_mac, Stat()});
+				insert_info = stat_endpoint_mac.insert({src_mac, EndpointStat()});
 				stat_finder = insert_info.first;
 			}
 
-			stat_finder->second.tx_packets += 1;
-			stat_finder->second.tx_bytes += header->caplen;
+			stat_finder->second.tx.packets += 1;
+			stat_finder->second.tx.bytes += header->caplen;
 
 			stat_finder = stat_endpoint_mac.find(dst_mac);
 
 			if (stat_finder == stat_endpoint_mac.end()) {
-				insert_info = stat_endpoint_mac.insert({dst_mac, Stat()});
+				insert_info = stat_endpoint_mac.insert({dst_mac, EndpointStat()});
 				stat_finder = insert_info.first;
 			}
 
-			stat_finder->second.rx_packets += 1;
-			stat_finder->second.rx_bytes += header->caplen;
+			stat_finder->second.rx.packets += 1;
+			stat_finder->second.rx.bytes += header->caplen;
 		}
 
 		/* adjust the packet with IPv4 protocol */
@@ -109,22 +121,34 @@ int main(int argc, char* argv[]) {
 			std::pair<IpStat::iterator, bool> insert_info;
 
 			if (stat_finder == stat_endpoint_ip.end()) {
-				insert_info = stat_endpoint_ip.insert({src_ip, Stat()});
+				insert_info = stat_endpoint_ip.insert({src_ip, EndpointStat()});
 				stat_finder = insert_info.first;
 			}
 
-			stat_finder->second.tx_packets += 1;
-			stat_finder->second.tx_bytes += header->caplen;
+			stat_finder->second.tx.packets += 1;
+			stat_finder->second.tx.bytes += header->caplen;
 			
 			stat_finder = stat_endpoint_ip.find(dst_ip);
 
 			if (stat_finder == stat_endpoint_ip.end()) {
-				insert_info = stat_endpoint_ip.insert({dst_ip, Stat()});
+				insert_info = stat_endpoint_ip.insert({dst_ip, EndpointStat()});
 				stat_finder = insert_info.first;
 			}
 
-			stat_finder->second.rx_packets += 1;
-			stat_finder->second.rx_bytes += header->caplen;
+			stat_finder->second.rx.packets += 1;
+			stat_finder->second.rx.bytes += header->caplen;
+
+			// IPv4 flow statistics
+			IpFlowStat::iterator flowstat_finder = stat_flow_ip.find({src_ip, dst_ip});
+			std::pair<IpFlowStat::iterator, bool> flow_insert_info;
+
+			if (flowstat_finder == stat_flow_ip.end()) {
+				flow_insert_info = stat_flow_ip.insert({{src_ip, dst_ip}, Stat()});
+				flowstat_finder = flow_insert_info.first;
+			}
+
+			flowstat_finder->second.packets += 1;
+			flowstat_finder->second.bytes += header->caplen;
 		}
 
 		/* apply to TCP or UDP statistics */
@@ -155,88 +179,132 @@ int main(int argc, char* argv[]) {
 			std::pair<TcpUdpStat::iterator, bool> insert_info;
 
 			if (stat_finder == target_stat_endpoint->end()) {
-				insert_info = target_stat_endpoint->insert({{src_ip, src_port}, Stat()});
+				insert_info = target_stat_endpoint->insert({{src_ip, src_port}, EndpointStat()});
 				stat_finder = insert_info.first;
 			}
 
-			stat_finder->second.tx_packets += 1;
-			stat_finder->second.tx_bytes += header->caplen;
+			stat_finder->second.tx.packets += 1;
+			stat_finder->second.tx.bytes += header->caplen;
 			
 			stat_finder = target_stat_endpoint->find({dst_ip, dst_port});
 
 			if (stat_finder == target_stat_endpoint->end()) {
-				insert_info = target_stat_endpoint->insert({{dst_ip, dst_port}, Stat()});
+				insert_info = target_stat_endpoint->insert({{dst_ip, dst_port}, EndpointStat()});
 				stat_finder = insert_info.first;
 			}
 
-			stat_finder->second.rx_packets += 1;
-			stat_finder->second.rx_bytes += header->caplen;
+			stat_finder->second.rx.packets += 1;
+			stat_finder->second.rx.bytes += header->caplen;
 
 			break;
 		} while (true);
 	}
 
+	//// close pcap
+	pcap_close(handle);
+
+	printf("Statistics of Endpoint by MAC Address\n");
+
 	for (auto &map_elem : stat_endpoint_mac) {
 		MacAddr addr = map_elem.first;
-		Stat& stat = map_elem.second;
+		EndpointStat& stat = map_elem.second;
 		addr.print_mac_addr();
 		printf(": Tx Packets=%u, Tx Bytes=%u, Rx Packets=%u, Rx Bytes=%u\n",
-		       stat.tx_packets,
-		       stat.tx_bytes,
-		       stat.rx_packets,
-		       stat.rx_bytes
+		       stat.tx.packets,
+		       stat.tx.bytes,
+		       stat.rx.packets,
+		       stat.rx.bytes
 		);
 	}
 
 	printf("\n");
+	printf("Statistics of Endpoint by IPv4 Address\n");
 	
 	for (auto &map_elem : stat_endpoint_ip) {
 		IPv4Addr addr;
-		Stat& stat = map_elem.second;
+		EndpointStat& stat = map_elem.second;
 		addr.ip = map_elem.first;
 		addr.print_ipv4_addr();
 		printf(": Tx Packets=%u, Tx Bytes=%u, Rx Packets=%u, Rx Bytes=%u\n",
-		       stat.tx_packets,
-		       stat.tx_bytes,
-		       stat.rx_packets,
-		       stat.rx_bytes
+		       stat.tx.packets,
+		       stat.tx.bytes,
+		       stat.rx.packets,
+		       stat.rx.bytes
 		);
 	}
 
 	printf("\n");
+	printf("Statistics of Endpoint by TCP\n");
 	
 	for (auto &map_elem : stat_endpoint_tcp) {
 		IPv4Addr addr;
-		Stat& stat = map_elem.second;
+		EndpointStat& stat = map_elem.second;
 		addr.ip = map_elem.first.first;
 		addr.print_ipv4_addr();
 		printf(":%d: Tx Packets=%u, Tx Bytes=%u, Rx Packets=%u, Rx Bytes=%u\n",
 		       ntohs(map_elem.first.second),
-		       stat.tx_packets,
-		       stat.tx_bytes,
-		       stat.rx_packets,
-		       stat.rx_bytes
+		       stat.tx.packets,
+		       stat.tx.bytes,
+		       stat.rx.packets,
+		       stat.rx.bytes
 		);
 	}
 
 	printf("\n");
+	printf("Statistics of Endpoint by UDP\n");
 	
 	for (auto &map_elem : stat_endpoint_udp) {
 		IPv4Addr addr;
-		Stat& stat = map_elem.second;
+		EndpointStat& stat = map_elem.second;
 		addr.ip = map_elem.first.first;
 		addr.print_ipv4_addr();
 		printf(":%d: Tx Packets=%u, Tx Bytes=%u, Rx Packets=%u, Rx Bytes=%u\n",
 		       ntohs(map_elem.first.second),
-		       stat.tx_packets,
-		       stat.tx_bytes,
-		       stat.rx_packets,
-		       stat.rx_bytes
+		       stat.tx.packets,
+		       stat.tx.bytes,
+		       stat.rx.packets,
+		       stat.rx.bytes
 		);
 	}
 
-	//// close pcap
-	pcap_close(handle);
+	printf("\n");
+	printf("Statistics of Conversation by IPv4\n");
+
+	IpConvStat stat_conv_ip;
+	
+	for (auto &map_elem : stat_flow_ip) {
+		std::pair<uint32_t, uint32_t> ip_pair = map_elem.first, ip_reverse_pair;
+		Stat &conv = map_elem.second;
+		ip_reverse_pair = {ip_pair.second, ip_pair.first};
+
+		IpConvStat::iterator it1 = stat_conv_ip.find(ip_pair);
+		IpConvStat::iterator it2 = stat_conv_ip.find(ip_reverse_pair);
+
+		if (it1 == stat_conv_ip.end()) {
+			if (it2 == stat_conv_ip.end()) {
+				stat_conv_ip.insert({ip_pair, {conv, Stat()}});
+			}
+			else {
+				it2->second.second_to_first = conv;
+			}
+		}
+	}
+
+	for (auto &map_elem : stat_conv_ip) {
+		IPv4Addr addr_first, addr_second;
+		ConvStat& stat = map_elem.second;
+		addr_first.ip = map_elem.first.first;
+		addr_second.ip = map_elem.first.second;
+		addr_first.print_ipv4_addr();
+		printf(" - ");
+		addr_second.print_ipv4_addr();
+		printf(": 1->2 Packets=%u, 1->2 Bytes=%u, 2->1 Packets=%u, 2->1 Bytes=%u\n",
+		       stat.first_to_second.packets,
+		       stat.first_to_second.bytes,
+		       stat.second_to_first.packets,
+		       stat.second_to_first.bytes
+		);
+	}
 }
 
 
